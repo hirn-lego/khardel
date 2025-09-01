@@ -50,6 +50,41 @@ This is passed to \"vcard new\".'"
 (defvar khardel--emails nil
   "Cache a list of strings of the form \"Name <email>\".")
 
+(defvar khardel--khard-addressbooks-list nil
+  "List of `khard' addressbooks
+Caches output of `khardel-refresh-khard-addressbooks'")
+
+
+(defun khardel-refresh-khard-addressbooks ()
+  "Update known addressbooks via call to `khard addressbooks'"
+  (interactive)
+  (save-excursion
+    (with-temp-buffer
+      (apply #'call-process
+             `(, (or khardel-command
+                     (executable-find "khard"))
+                 nil t nil
+                 "addressbooks"))
+      (setq khardel--khard-addressbooks-list
+             (split-string
+             (buffer-substring (point-min) (point-max))
+             "[\f\t\n\r\v]+"
+             't
+             "[ ]+"))))
+  khardel--khard-addressbooks-list
+  )
+
+
+(defun khardel--ask-for-addressbook()
+  "Ask the user to select a khard addressbook"
+  (completing-read "Select an addressbook: "
+                   (or khardel--khard-addressbooks-list
+                       (khardel-refresh-khard-addressbooks))
+                   nil 'configm)
+  )
+
+
+
 (defun khardel--list-contacts ()
   "Return a map whose keys are names and values are contacts."
   (save-match-data
@@ -136,24 +171,28 @@ If nil, the buffer represents a new contact.")
 (defun khardel-edit-finish ()
   "Save contact in current buffer with khard."
   (interactive)
-  (let* ((filename (make-temp-file "khard"))
-         (args (if khardel-edit-contact
-                   `("edit"
+  (let ((selected-addressbook (khardel--ask-for-addressbook)))
+    (let* ((filename (make-temp-file "khard"))
+           (args (if khardel-edit-contact
+                     `("edit"
+                       "--input-file" ,filename
+                       "--addressbook" ,selected-addressbook
+                       ,(format "uid:%s" (car khardel-edit-contact)))
+                   `("new"
                      "--input-file" ,filename
-                     ,(format "uid:%s" (car khardel-edit-contact)))
-                 `("new"
-                   "--input-file" ,filename
-                   "--vcard-version" ,khardel-vcard-version))))
-    (write-region (point-min) (point-max) filename)
-    (when (equal 0 (apply
-                    #'call-process-region
-                    "y\n" ;; ⇐ khard asks for confirmation
-                    nil
-                    "khard"
-                    nil t nil
-                    args))
-      (kill-buffer)
-      (run-hooks 'khardel-edit-finished-hook))))
+                     "--vcard-version" ,khardel-vcard-version
+                     "--addressbook" ,selected-addressbook))))
+      (write-region (point-min) (point-max) filename)
+      (when (equal 0 (apply
+                      #'call-process
+                      "khard" 
+                      nil
+                      t
+                      nil 
+                      args))
+        (kill-buffer)
+        (run-hooks 'khardel-edit-finished-hook))))
+ )
 
 ;;;###autoload
 (defun khardel-insert-email ()
